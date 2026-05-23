@@ -962,7 +962,7 @@ console.log(err)
 
 }
 
-})s
+})
 
 }
 
