@@ -1,17 +1,32 @@
+const express = require("express")
+const app = express()
+
+const PORT = process.env.PORT || 3000
+
+app.get("/", (req, res) => {
+    res.send("HansMD Bot is Running ✅")
+})
+
+app.listen(PORT, () => {
+    console.log("Server running on port " + PORT)
+})
+
 const {
 default: makeWASocket,
 useMultiFileAuthState,
 fetchLatestBaileysVersion,
-DisconnectReason
+downloadContentFromMessage
 } = require("@whiskeysockets/baileys")
 
 const P = require("pino")
 const os = require("os")
-const qrcode = require("qrcode-terminal")
+const fs = require("fs")
+
+const OWNER_NUMBER = "233204908710@s.whatsapp.net"
 
 async function startBot() {
 
-const { state, saveCreds } = await useMultiFileAuthState("./session")
+const { state, saveCreds } = await useMultiFileAuthState("session")
 
 const { version } = await fetchLatestBaileysVersion()
 
@@ -22,59 +37,47 @@ auth: state,
 browser: ["HansMD", "Chrome", "1.0.0"]
 })
 
-
-// QR CODE
-
-sock.ev.on("connection.update", async (update) => {
-
-const { connection, lastDisconnect, qr } = update
-
-if (qr) {
-console.log("Scan this QR code:\n")
-qrcode.generate(qr, { small: true })
-}
-
-if (connection === "open") {
 console.log("HansMD Connected ✅")
-}
-
-if (connection === "close") {
-
-const shouldReconnect =
-lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut
-
-console.log("Connection closed.")
-
-if (shouldReconnect) {
-startBot()
-}
-
-}
-
-})
-
-
-// SAVE SESSION
 
 sock.ev.on("creds.update", saveCreds)
 
 
-// MESSAGES
+// ======================
+// AUTO STATUS VIEW + LIKE
+// ======================
 
 sock.ev.on("messages.upsert", async ({ messages }) => {
 
 try {
 
-const msg = messages[0]
+const mek = messages[0]
+if (!mek.message) return
 
-if (!msg.message) return
-if (msg.key.fromMe) return
+const from = mek.key.remoteJid
 
-const from = msg.key.remoteJid
+// Auto view status
+if (from === "status@broadcast") {
+
+console.log("Viewed Status ✅")
+
+await sock.readMessages([mek.key])
+
+await sock.sendMessage(
+"status@broadcast",
+{
+react: {
+text: "❤️",
+key: mek.key
+}
+}
+)
+
+return
+}
 
 const text =
-msg.message.conversation ||
-msg.message.extendedTextMessage?.text ||
+mek.message.conversation ||
+mek.message.extendedTextMessage?.text ||
 ""
 
 console.log("Message:", text)
@@ -92,7 +95,7 @@ text: "Pong 🏓"
 
 }
 
-else if (text === ".alive") {
+if (text === ".alive") {
 
 await sock.sendMessage(from, {
 text: "HansMD is Alive ✅"
@@ -100,7 +103,7 @@ text: "HansMD is Alive ✅"
 
 }
 
-else if (text === ".owner") {
+if (text === ".owner") {
 
 await sock.sendMessage(from, {
 text: "Owner : Mr Hans 👑"
@@ -108,7 +111,7 @@ text: "Owner : Mr Hans 👑"
 
 }
 
-else if (text === ".runtime") {
+if (text === ".runtime") {
 
 const runtime = process.uptime()
 
@@ -118,7 +121,7 @@ text: `Runtime ⏱️ : ${Math.floor(runtime)} seconds`
 
 }
 
-else if (text === ".status") {
+if (text === ".status") {
 
 await sock.sendMessage(from, {
 text: "Bot Status ✅ Online"
@@ -126,7 +129,7 @@ text: "Bot Status ✅ Online"
 
 }
 
-else if (text === ".cpu") {
+if (text === ".cpu") {
 
 await sock.sendMessage(from, {
 text: `CPU Cores 🖥️ : ${os.cpus().length}`
@@ -134,7 +137,7 @@ text: `CPU Cores 🖥️ : ${os.cpus().length}`
 
 }
 
-else if (text === ".ram") {
+if (text === ".ram") {
 
 const ram = (os.totalmem() / 1024 / 1024 / 1024).toFixed(2)
 
@@ -144,7 +147,7 @@ text: `RAM 💾 : ${ram} GB`
 
 }
 
-else if (text === ".time") {
+if (text === ".time") {
 
 const time = new Date().toLocaleTimeString()
 
@@ -154,7 +157,7 @@ text: `Current Time ⏰ : ${time}`
 
 }
 
-else if (text === ".date") {
+if (text === ".date") {
 
 const date = new Date().toDateString()
 
@@ -166,10 +169,10 @@ text: `Today's Date 📅 : ${date}`
 
 
 // ======================
-// AUTO REPLIES
+// AUTO REPLY
 // ======================
 
-else if (text.toLowerCase() === "hi") {
+if (text === "hi") {
 
 await sock.sendMessage(from, {
 text: "Hello 👋 I am HansMD Bot"
@@ -177,7 +180,7 @@ text: "Hello 👋 I am HansMD Bot"
 
 }
 
-else if (text.toLowerCase() === "hello") {
+if (text === "hello") {
 
 await sock.sendMessage(from, {
 text: "Hi there 😊"
@@ -185,7 +188,7 @@ text: "Hi there 😊"
 
 }
 
-else if (text.toLowerCase() === "goodnight") {
+if (text === "goodnight") {
 
 await sock.sendMessage(from, {
 text: "Goodnight 🌙 Sleep well"
@@ -198,7 +201,7 @@ text: "Goodnight 🌙 Sleep well"
 // FUN COMMANDS
 // ======================
 
-else if (text === ".joke") {
+if (text === ".joke") {
 
 await sock.sendMessage(from, {
 text: "Why do programmers love dark mode? Because light attracts bugs 😂"
@@ -206,7 +209,7 @@ text: "Why do programmers love dark mode? Because light attracts bugs 😂"
 
 }
 
-else if (text === ".quote") {
+if (text === ".quote") {
 
 await sock.sendMessage(from, {
 text: "Success comes from consistency 💯"
@@ -214,7 +217,7 @@ text: "Success comes from consistency 💯"
 
 }
 
-else if (text === ".truth") {
+if (text === ".truth") {
 
 await sock.sendMessage(from, {
 text: "Truth 🤔 : What is your biggest secret?"
@@ -222,7 +225,7 @@ text: "Truth 🤔 : What is your biggest secret?"
 
 }
 
-else if (text === ".dare") {
+if (text === ".dare") {
 
 await sock.sendMessage(from, {
 text: "Dare 😈 : Send a funny voice note."
@@ -230,7 +233,7 @@ text: "Dare 😈 : Send a funny voice note."
 
 }
 
-else if (text === ".hack") {
+if (text === ".hack") {
 
 await sock.sendMessage(from, {
 text: "Access Granted 💻\nInjecting Hollywood Hacker Animation..."
@@ -238,7 +241,7 @@ text: "Access Granted 💻\nInjecting Hollywood Hacker Animation..."
 
 }
 
-else if (text === ".ship") {
+if (text === ".ship") {
 
 await sock.sendMessage(from, {
 text: "Love Percentage ❤️ : 89%"
@@ -246,7 +249,7 @@ text: "Love Percentage ❤️ : 89%"
 
 }
 
-else if (text === ".character") {
+if (text === ".character") {
 
 await sock.sendMessage(from, {
 text: "Your Anime Character ⚔️ : Shadow King"
@@ -256,10 +259,161 @@ text: "Your Anime Character ⚔️ : Shadow King"
 
 
 // ======================
+// GROUP COMMANDS
+// ======================
+
+if (text === ".tagall") {
+
+await sock.sendMessage(from, {
+text: "📢 Attention Everyone!"
+})
+
+}
+
+if (text === ".mute") {
+
+await sock.sendMessage(from, {
+text: "Group Muted 🔇"
+})
+
+}
+
+if (text === ".unmute") {
+
+await sock.sendMessage(from, {
+text: "Group Unmuted 🔊"
+})
+
+}
+
+if (text === ".warn") {
+
+await sock.sendMessage(from, {
+text: "⚠️ Warning Sent"
+})
+
+}
+
+
+// ======================
+// ADMIN COMMANDS
+// ======================
+
+if (text === ".groupinfo") {
+
+await sock.sendMessage(from, {
+text: `Group ID : ${from}`
+})
+
+}
+
+if (text === ".admins") {
+
+await sock.sendMessage(from, {
+text: "👑 Admin command working"
+})
+
+}
+
+if (text === ".welcome") {
+
+await sock.sendMessage(from, {
+text: "Welcome Message Enabled ✅"
+})
+
+}
+
+if (text === ".goodbye") {
+
+await sock.sendMessage(from, {
+text: "Goodbye Message Enabled ✅"
+})
+
+}
+
+if (text === ".antilink") {
+
+await sock.sendMessage(from, {
+text: "Anti-Link Activated 🚫"
+})
+
+}
+
+if (text === ".public") {
+
+await sock.sendMessage(from, {
+text: "Bot Mode : Public 🌍"
+})
+
+}
+
+if (text === ".private") {
+
+await sock.sendMessage(from, {
+text: "Bot Mode : Private 🔒"
+})
+
+}
+
+
+// ======================
+// DOWNLOAD COMMANDS
+// ======================
+
+if (text.startsWith(".song")) {
+
+await sock.sendMessage(from, {
+text: "🎵 Song Downloader Coming Soon"
+})
+
+}
+
+if (text.startsWith(".video")) {
+
+await sock.sendMessage(from, {
+text: "🎬 Video Downloader Coming Soon"
+})
+
+}
+
+if (text.startsWith(".play")) {
+
+await sock.sendMessage(from, {
+text: "▶️ Music Search Coming Soon"
+})
+
+}
+
+if (text.startsWith(".tiktok")) {
+
+await sock.sendMessage(from, {
+text: "🎵 TikTok Downloader Coming Soon"
+})
+
+}
+
+if (text.startsWith(".facebook")) {
+
+await sock.sendMessage(from, {
+text: "📘 Facebook Downloader Coming Soon"
+})
+
+}
+
+if (text.startsWith(".instagram")) {
+
+await sock.sendMessage(from, {
+text: "📸 Instagram Downloader Coming Soon"
+})
+
+}
+
+
+// ======================
 // AI COMMAND
 // ======================
 
-else if (text.startsWith(".ai ")) {
+if (text.startsWith(".ai ")) {
 
 const query = text.slice(4)
 
@@ -271,15 +425,86 @@ text: `AI Response 🤖\n\n${query}`
 
 
 // ======================
+// VIEW ONCE RECOVERY
+// ======================
+
+if (text === ".vv") {
+
+const quoted = mek.message.extendedTextMessage?.contextInfo?.quotedMessage
+
+if (!quoted) {
+return await sock.sendMessage(from, {
+text: "Reply to a view once message using .vv"
+})
+}
+
+let msg =
+quoted.viewOnceMessage?.message ||
+quoted.viewOnceMessageV2?.message
+
+if (!msg) {
+return await sock.sendMessage(from, {
+text: "That is not a view once message"
+})
+}
+
+if (msg.imageMessage) {
+
+const stream = await downloadContentFromMessage(
+msg.imageMessage,
+"image"
+)
+
+let buffer = Buffer.from([])
+
+for await (const chunk of stream) {
+buffer = Buffer.concat([buffer, chunk])
+}
+
+fs.writeFileSync("./vv.jpg", buffer)
+
+await sock.sendMessage(from, {
+image: fs.readFileSync("./vv.jpg"),
+caption: "View Once Recovered ✅"
+})
+
+}
+
+else if (msg.videoMessage) {
+
+const stream = await downloadContentFromMessage(
+msg.videoMessage,
+"video"
+)
+
+let buffer = Buffer.from([])
+
+for await (const chunk of stream) {
+buffer = Buffer.concat([buffer, chunk])
+}
+
+fs.writeFileSync("./vv.mp4", buffer)
+
+await sock.sendMessage(from, {
+video: fs.readFileSync("./vv.mp4"),
+caption: "View Once Recovered ✅"
+})
+
+}
+
+}
+
+
+// ======================
 // MENU
 // ======================
 
-else if (text === ".menu") {
+if (text === ".menu") {
 
 await sock.sendMessage(from, {
 text: `
 ╔══════════════╗
-     HANSMD BOT
+      HANSMD BOT
 ╚══════════════╝
 
 👑 Owner : Mr Hans
@@ -298,6 +523,12 @@ text: `
 ┃ .date
 ╰────────────────╯
 
+╭──〔 AUTO REPLY 〕──╮
+┃ hi
+┃ hello
+┃ goodnight
+╰──────────────────╯
+
 ╭──〔 FUN MENU 〕──╮
 ┃ .joke
 ┃ .quote
@@ -308,9 +539,39 @@ text: `
 ┃ .character
 ╰────────────────╯
 
+╭──〔 GROUP MENU 〕──╮
+┃ .tagall
+┃ .mute
+┃ .unmute
+┃ .warn
+╰────────────────╯
+
+╭──〔 ADMIN MENU 〕──╮
+┃ .groupinfo
+┃ .admins
+┃ .welcome
+┃ .goodbye
+┃ .antilink
+┃ .public
+┃ .private
+╰──────────────────╯
+
+╭──〔 DOWNLOAD MENU 〕──╮
+┃ .song
+┃ .video
+┃ .play
+┃ .tiktok
+┃ .facebook
+┃ .instagram
+╰─────────────────────╯
+
 ╭──〔 AI MENU 〕──╮
 ┃ .ai hello
 ╰────────────────╯
+
+╭──〔 EXTRA MENU 〕──╮
+┃ .vv
+╰───────────────────╯
 `
 })
 
@@ -318,7 +579,7 @@ text: `
 
 } catch (err) {
 
-console.log("Error:", err)
+console.log(err)
 
 }
 
