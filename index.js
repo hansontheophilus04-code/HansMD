@@ -11,6 +11,26 @@ app.listen(PORT, () => {
 console.log("Server running on port " + PORT)
 })
 
+
+// ======================
+// ERROR HANDLERS
+// ======================
+
+process.on("uncaughtException", err => {
+console.log("UNCAUGHT EXCEPTION:")
+console.log(err)
+})
+
+process.on("unhandledRejection", err => {
+console.log("UNHANDLED REJECTION:")
+console.log(err)
+})
+
+
+// ======================
+// IMPORTS
+// ======================
+
 const {
 default: makeWASocket,
 useMultiFileAuthState,
@@ -21,10 +41,14 @@ DisconnectReason
 
 const P = require("pino")
 const os = require("os")
-const fs = require("fs")
 const qrcode = require("qrcode-terminal")
 
 const OWNER_NUMBER = "233204908710@s.whatsapp.net"
+
+
+// ======================
+// START BOT
+// ======================
 
 async function startBot() {
 
@@ -71,12 +95,23 @@ if (connection === "close") {
 
 console.log("Connection Closed ❌")
 
+const statusCode =
+lastDisconnect?.error?.output?.statusCode
+
+console.log("Status Code:", statusCode)
+
 const shouldReconnect =
-lastDisconnect?.error?.output?.statusCode !==
-DisconnectReason.loggedOut
+statusCode !== DisconnectReason.loggedOut
 
 if (shouldReconnect) {
+
+console.log("Reconnecting...")
 startBot()
+
+} else {
+
+console.log("Logged out from WhatsApp.")
+
 }
 
 }
@@ -92,20 +127,39 @@ sock.ev.on("creds.update", saveCreds)
 
 
 // ======================
-// AUTO STATUS VIEW + LIKE
+// MESSAGE LISTENER
 // ======================
 
 sock.ev.on("messages.upsert", async ({ messages }) => {
 
+console.log(JSON.stringify(messages, null, 2))
+
 try {
 
 const mek = messages[0]
+
 if (!mek.message) return
-if (mek.key.fromMe) return
+
+// REMOVE THIS LINE FOR TESTING
+// if (mek.key.fromMe) return
 
 const from = mek.key.remoteJid
 
-// AUTO VIEW STATUS
+const msg = mek.message
+
+const text =
+msg.conversation ||
+msg.extendedTextMessage?.text ||
+msg.imageMessage?.caption ||
+msg.videoMessage?.caption ||
+""
+
+console.log("Message:", text)
+
+
+// ======================
+// AUTO STATUS VIEW
+// ======================
 
 if (from === "status@broadcast") {
 
@@ -125,13 +179,6 @@ key: mek.key
 
 return
 }
-
-const text =
-mek.message.conversation ||
-mek.message.extendedTextMessage?.text ||
-""
-
-console.log("Message:", text)
 
 
 // ======================
@@ -339,6 +386,7 @@ text: "That is not a View Once message."
 
 }
 
+
 // IMAGE
 
 if (msg.imageMessage) {
@@ -354,14 +402,13 @@ for await (const chunk of stream) {
 buffer = Buffer.concat([buffer, chunk])
 }
 
-fs.writeFileSync("./vv.jpg", buffer)
-
 await sock.sendMessage(from, {
-image: fs.readFileSync("./vv.jpg"),
+image: buffer,
 caption: "👀 View Once Image Recovered"
 })
 
 }
+
 
 // VIDEO
 
@@ -378,10 +425,8 @@ for await (const chunk of stream) {
 buffer = Buffer.concat([buffer, chunk])
 }
 
-fs.writeFileSync("./vv.mp4", buffer)
-
 await sock.sendMessage(from, {
-video: fs.readFileSync("./vv.mp4"),
+video: buffer,
 caption: "👀 View Once Video Recovered"
 })
 
@@ -460,6 +505,7 @@ text: `
 
 } catch (err) {
 
+console.log("ERROR:")
 console.log(err)
 
 }
