@@ -1,16 +1,58 @@
 const express = require("express")
 const app = express()
 
+const axios = require("axios")
+const os = require("os")
+const fs = require("fs")
+const P = require("pino")
+const qrcode = require("qrcode-terminal")
+
+const {
+default: makeWASocket,
+useMultiFileAuthState,
+fetchLatestBaileysVersion,
+downloadContentFromMessage,
+DisconnectReason,
+delay
+} = require("@whiskeysockets/baileys")
+
+// ======================
+// SETTINGS
+// ======================
+
 const PORT = process.env.PORT || 3000
+const PREFIX = "."
+const OWNER_NUMBER = "233204908710@s.whatsapp.net"
+
+// ======================
+// EXPRESS SERVER
+// ======================
 
 app.get("/", (req, res) => {
-res.send("HansMD Bot is Running ✅")
+res.send("HansMD Advanced Bot Running ✅")
 })
 
 app.listen(PORT, () => {
-console.log("Server running on port " + PORT)
+console.log(`Server running on port ${PORT}`)
 })
 
+// ======================
+// DATABASE
+// ======================
+
+let users = {}
+let antiLinkGroups = {}
+let autoReply = true
+
+if (fs.existsSync("./users.json")) {
+users = JSON.parse(fs.readFileSync("./users.json"))
+}
+
+if (fs.existsSync("./antilink.json")) {
+antiLinkGroups = JSON.parse(
+fs.readFileSync("./antilink.json")
+)
+}
 
 // ======================
 // ERROR HANDLERS
@@ -26,25 +68,23 @@ console.log("UNHANDLED REJECTION:")
 console.log(err)
 })
 
-
 // ======================
-// IMPORTS
+// SAVE DATABASE
 // ======================
 
-const {
-default: makeWASocket,
-useMultiFileAuthState,
-fetchLatestBaileysVersion,
-downloadContentFromMessage,
-DisconnectReason
-} = require("@whiskeysockets/baileys")
+function saveDB() {
 
-const P = require("pino")
-const os = require("os")
-const qrcode = require("qrcode-terminal")
+fs.writeFileSync(
+"./users.json",
+JSON.stringify(users, null, 2)
+)
 
-const OWNER_NUMBER = "233204908710@s.whatsapp.net"
+fs.writeFileSync(
+"./antilink.json",
+JSON.stringify(antiLinkGroups, null, 2)
+)
 
+}
 
 // ======================
 // START BOT
@@ -60,24 +100,27 @@ await fetchLatestBaileysVersion()
 
 const sock = makeWASocket({
 version,
-printQRInTerminal: true,
 logger: P({ level: "silent" }),
+printQRInTerminal: false,
 auth: state,
-browser: ["HansMD", "Chrome", "1.0.0"]
+browser: ["HansMD", "Chrome", "5.0.0"]
 })
 
-
 // ======================
-// CONNECTION UPDATE
+// CONNECTION
 // ======================
 
-sock.ev.on("connection.update", async (update) => {
+sock.ev.on("connection.update", async update => {
 
-const { connection, lastDisconnect, qr } = update
+const {
+connection,
+lastDisconnect,
+qr
+} = update
 
 if (qr) {
 
-console.log("Scan The QR Code Below 👇")
+console.log("Scan QR Below 👇")
 
 qrcode.generate(qr, {
 small: true
@@ -93,24 +136,17 @@ console.log("HansMD Connected ✅")
 
 if (connection === "close") {
 
-console.log("Connection Closed ❌")
-
 const statusCode =
 lastDisconnect?.error?.output?.statusCode
 
-console.log("Status Code:", statusCode)
+console.log("Disconnected:", statusCode)
 
-const shouldReconnect =
+if (
 statusCode !== DisconnectReason.loggedOut
-
-if (shouldReconnect) {
+) {
 
 console.log("Reconnecting...")
 startBot()
-
-} else {
-
-console.log("Logged out from WhatsApp.")
 
 }
 
@@ -118,13 +154,51 @@ console.log("Logged out from WhatsApp.")
 
 })
 
-
 // ======================
-// SAVE SESSION
+// SAVE CREDS
 // ======================
 
 sock.ev.on("creds.update", saveCreds)
 
+// ======================
+// WELCOME & GOODBYE
+// ======================
+
+sock.ev.on(
+"group-participants.update",
+async data => {
+
+try {
+
+for (let user of data.participants) {
+
+if (data.action === "add") {
+
+await sock.sendMessage(data.id, {
+text:
+`👋 Welcome @${user.split("@")[0]} to HansMD Group`,
+mentions: [user]
+})
+
+}
+
+if (data.action === "remove") {
+
+await sock.sendMessage(data.id, {
+text:
+`😢 Goodbye @${user.split("@")[0]}`,
+mentions: [user]
+})
+
+}
+
+}
+
+} catch (err) {
+console.log(err)
+}
+
+})
 
 // ======================
 // MESSAGE LISTENER
@@ -132,18 +206,21 @@ sock.ev.on("creds.update", saveCreds)
 
 sock.ev.on("messages.upsert", async ({ messages }) => {
 
-console.log(JSON.stringify(messages, null, 2))
-
 try {
 
 const mek = messages[0]
 
 if (!mek.message) return
 
-// REMOVE THIS LINE FOR TESTING
-// if (mek.key.fromMe) return
-
 const from = mek.key.remoteJid
+
+const isGroup = from.endsWith("@g.us")
+
+const sender =
+mek.key.participant || from
+
+const isOwner =
+sender === OWNER_NUMBER
 
 const msg = mek.message
 
@@ -154,16 +231,15 @@ msg.imageMessage?.caption ||
 msg.videoMessage?.caption ||
 ""
 
-console.log("Message:", text)
+if (!text) return
 
+console.log("Message:", text)
 
 // ======================
 // AUTO STATUS VIEW
 // ======================
 
 if (from === "status@broadcast") {
-
-console.log("Viewed Status ✅")
 
 await sock.readMessages([mek.key])
 
@@ -178,328 +254,704 @@ key: mek.key
 )
 
 return
-}
 
+}
 
 // ======================
-// MAIN COMMANDS
+// AUTO REACT
 // ======================
 
-if (text === ".ping") {
+await sock.sendMessage(from, {
+react: {
+text: "⚡",
+key: mek.key
+}
+})
+
+// ======================
+// LEVEL SYSTEM
+// ======================
+
+if (!users[sender]) {
+
+users[sender] = {
+xp: 0,
+level: 1
+}
+
+}
+
+users[sender].xp += 5
+
+if (
+users[sender].xp >=
+users[sender].level * 100
+) {
+
+users[sender].level += 1
 
 await sock.sendMessage(from, {
-text: "Pong 🏓"
+text:
+`🎉 Level Up!\nNew Level: ${users[sender].level}`
 })
 
 }
 
-else if (text === ".alive") {
+saveDB()
+
+// ======================
+// ANTILINK
+// ======================
+
+if (
+isGroup &&
+antiLinkGroups[from] &&
+text.includes("https://chat.whatsapp.com/")
+) {
 
 await sock.sendMessage(from, {
-text: "HansMD is Alive ✅"
+delete: mek.key
+})
+
+await sock.sendMessage(from, {
+text:
+"🚫 Group links are forbidden."
+})
+
+return
+
+}
+
+// ======================
+// COMMANDS
+// ======================
+
+if (text === `${PREFIX}ping`) {
+
+await sock.sendMessage(from, {
+text: "🏓 Pong!"
 })
 
 }
 
-else if (text === ".owner") {
+// ======================
+
+else if (text === `${PREFIX}alive`) {
 
 await sock.sendMessage(from, {
-text: "Owner : Mr Hans 👑"
+text:
+"✅ HansMD Advanced Bot Online"
 })
 
 }
 
-else if (text === ".runtime") {
+// ======================
+
+else if (text === `${PREFIX}menu`) {
+
+await sock.sendMessage(from, {
+text: `
+╔════════════╗
+   HANSMD BOT
+╚════════════╝
+
+👑 OWNER
+┃ .owner
+┃ .restart
+┃ .shutdown
+
+⚡ MAIN
+┃ .ping
+┃ .alive
+┃ .runtime
+┃ .time
+┃ .date
+┃ .menu
+
+🤖 AI
+┃ .ai question
+
+👥 GROUP
+┃ .tagall
+┃ .hidetag
+┃ .kick
+┃ .promote
+┃ .demote
+┃ .antilink on
+┃ .antilink off
+
+🎮 FUN
+┃ .joke
+┃ .quote
+┃ .truth
+┃ .dare
+┃ .ship
+
+📥 MEDIA
+┃ .vv
+┃ .sticker
+
+⚙️ SYSTEM
+┃ .cpu
+┃ .ram
+┃ .device
+┃ .level
+
+🔥 ADVANCED
+┃ .spam
+┃ .hack
+┃ .broadcast
+┃ .autoreply on/off
+`
+})
+
+}
+
+// ======================
+// OWNER
+// ======================
+
+else if (text === `${PREFIX}owner`) {
+
+await sock.sendMessage(from, {
+text: "👑 Owner : Mr Hans"
+})
+
+}
+
+// ======================
+// RUNTIME
+// ======================
+
+else if (text === `${PREFIX}runtime`) {
 
 const runtime = process.uptime()
 
 await sock.sendMessage(from, {
-text: `Runtime ⏱️ : ${Math.floor(runtime)} seconds`
+text:
+`⏱ Runtime: ${Math.floor(runtime)} seconds`
 })
 
 }
 
-else if (text === ".status") {
+// ======================
+// CPU
+// ======================
+
+else if (text === `${PREFIX}cpu`) {
 
 await sock.sendMessage(from, {
-text: "Bot Status ✅ Online"
+text:
+`🖥 CPU Cores: ${os.cpus().length}`
 })
 
 }
 
-else if (text === ".cpu") {
+// ======================
+// RAM
+// ======================
 
-await sock.sendMessage(from, {
-text: `CPU Cores 🖥️ : ${os.cpus().length}`
-})
-
-}
-
-else if (text === ".ram") {
+else if (text === `${PREFIX}ram`) {
 
 const ram =
-(os.totalmem() / 1024 / 1024 / 1024).toFixed(2)
+(os.totalmem() / 1024 / 1024 / 1024)
+.toFixed(2)
 
 await sock.sendMessage(from, {
-text: `RAM 💾 : ${ram} GB`
+text: `💾 RAM: ${ram} GB`
 })
 
 }
-
-else if (text === ".time") {
-
-const time = new Date().toLocaleTimeString()
-
-await sock.sendMessage(from, {
-text: `Current Time ⏰ : ${time}`
-})
-
-}
-
-else if (text === ".date") {
-
-const date = new Date().toDateString()
-
-await sock.sendMessage(from, {
-text: `Today's Date 📅 : ${date}`
-})
-
-}
-
 
 // ======================
-// AUTO REPLIES
+// DEVICE
 // ======================
 
-else if (text.toLowerCase() === "hi") {
+else if (text === `${PREFIX}device`) {
 
 await sock.sendMessage(from, {
-text: "Hello 👋 I am HansMD Bot"
+text:
+`📱 Platform: ${os.platform()}
+🧠 Hostname: ${os.hostname()}
+⚙️ Arch: ${os.arch()}`
 })
 
 }
-
-else if (text.toLowerCase() === "hello") {
-
-await sock.sendMessage(from, {
-text: "Hi there 😊"
-})
-
-}
-
-else if (text.toLowerCase() === "goodnight") {
-
-await sock.sendMessage(from, {
-text: "Goodnight 🌙 Sleep well"
-})
-
-}
-
 
 // ======================
-// FUN COMMANDS
+// TIME
 // ======================
 
-else if (text === ".joke") {
+else if (text === `${PREFIX}time`) {
 
 await sock.sendMessage(from, {
-text: "Why do programmers love dark mode? Because light attracts bugs 😂"
+text:
+`⏰ ${new Date().toLocaleTimeString()}`
 })
 
 }
-
-else if (text === ".quote") {
-
-await sock.sendMessage(from, {
-text: "Success comes from consistency 💯"
-})
-
-}
-
-else if (text === ".truth") {
-
-await sock.sendMessage(from, {
-text: "Truth 🤔 : What is your biggest secret?"
-})
-
-}
-
-else if (text === ".dare") {
-
-await sock.sendMessage(from, {
-text: "Dare 😈 : Send a funny voice note."
-})
-
-}
-
-else if (text === ".hack") {
-
-await sock.sendMessage(from, {
-text: "Access Granted 💻\nInjecting Hollywood Hacker Animation..."
-})
-
-}
-
-else if (text === ".ship") {
-
-await sock.sendMessage(from, {
-text: "Love Percentage ❤️ : 89%"
-})
-
-}
-
-else if (text === ".character") {
-
-await sock.sendMessage(from, {
-text: "Your Anime Character ⚔️ : Shadow King"
-})
-
-}
-
 
 // ======================
-// VIEW ONCE RECOVERY
+// DATE
 // ======================
 
-else if (text === ".vv") {
+else if (text === `${PREFIX}date`) {
+
+await sock.sendMessage(from, {
+text:
+`📅 ${new Date().toDateString()}`
+})
+
+}
+
+// ======================
+// LEVEL
+// ======================
+
+else if (text === `${PREFIX}level`) {
+
+await sock.sendMessage(from, {
+text:
+`⭐ XP: ${users[sender].xp}
+🏆 Level: ${users[sender].level}`
+})
+
+}
+
+// ======================
+// TAGALL
+// ======================
+
+else if (text === `${PREFIX}tagall`) {
+
+if (!isGroup)
+return sock.sendMessage(from, {
+text: "Group only."
+})
+
+const metadata =
+await sock.groupMetadata(from)
+
+const participants =
+metadata.participants
+
+let teks =
+"📢 TAGGING MEMBERS\n\n"
+
+for (let mem of participants) {
+
+teks +=
+`@${mem.id.split("@")[0]}\n`
+
+}
+
+await sock.sendMessage(from, {
+text: teks,
+mentions:
+participants.map(a => a.id)
+})
+
+}
+
+// ======================
+// HIDETAG
+// ======================
+
+else if (text.startsWith(`${PREFIX}hidetag`)) {
+
+if (!isGroup)
+return sock.sendMessage(from, {
+text: "Group only."
+})
+
+const metadata =
+await sock.groupMetadata(from)
+
+const participants =
+metadata.participants
+
+const message =
+text.replace(`${PREFIX}hidetag`, "")
+
+await sock.sendMessage(from, {
+text: message,
+mentions:
+participants.map(a => a.id)
+})
+
+}
+
+// ======================
+// ANTILINK
+// ======================
+
+else if (
+text === `${PREFIX}antilink on`
+) {
+
+antiLinkGroups[from] = true
+
+saveDB()
+
+await sock.sendMessage(from, {
+text: "✅ AntiLink Enabled"
+})
+
+}
+
+else if (
+text === `${PREFIX}antilink off`
+) {
+
+delete antiLinkGroups[from]
+
+saveDB()
+
+await sock.sendMessage(from, {
+text: "❌ AntiLink Disabled"
+})
+
+}
+
+// ======================
+// AI
+// ======================
+
+else if (
+text.startsWith(`${PREFIX}ai `)
+) {
+
+const query = text.slice(4)
+
+try {
+
+const res = await axios.get(
+`https://api.popcat.xyz/chatbot?msg=${encodeURIComponent(query)}&owner=Hans&botname=HansMD`
+)
+
+await sock.sendMessage(from, {
+text:
+`🤖 AI RESPONSE\n\n${res.data.response}`
+})
+
+} catch {
+
+await sock.sendMessage(from, {
+text: "AI failed."
+})
+
+}
+
+}
+
+// ======================
+// VIEW ONCE
+// ======================
+
+else if (text === `${PREFIX}vv`) {
 
 const quoted =
-mek.message.extendedTextMessage?.contextInfo?.quotedMessage
+mek.message.extendedTextMessage
+?.contextInfo?.quotedMessage
 
-if (!quoted) {
-
-return await sock.sendMessage(from, {
-text: "Reply to a View Once image/video using .vv"
+if (!quoted)
+return sock.sendMessage(from, {
+text:
+"Reply to a view once media."
 })
 
-}
-
-let msg =
+let viewOnce =
 quoted.viewOnceMessage?.message ||
 quoted.viewOnceMessageV2?.message
 
-if (!msg) {
-
-return await sock.sendMessage(from, {
-text: "That is not a View Once message."
+if (!viewOnce)
+return sock.sendMessage(from, {
+text: "Not view once."
 })
-
-}
-
 
 // IMAGE
 
-if (msg.imageMessage) {
+if (viewOnce.imageMessage) {
 
-const stream = await downloadContentFromMessage(
-msg.imageMessage,
+const stream =
+await downloadContentFromMessage(
+viewOnce.imageMessage,
 "image"
 )
 
 let buffer = Buffer.from([])
 
 for await (const chunk of stream) {
-buffer = Buffer.concat([buffer, chunk])
+buffer =
+Buffer.concat([buffer, chunk])
 }
 
 await sock.sendMessage(from, {
 image: buffer,
-caption: "👀 View Once Image Recovered"
+caption:
+"👀 Recovered View Once Image"
 })
 
 }
 
-
 // VIDEO
 
-else if (msg.videoMessage) {
+else if (viewOnce.videoMessage) {
 
-const stream = await downloadContentFromMessage(
-msg.videoMessage,
+const stream =
+await downloadContentFromMessage(
+viewOnce.videoMessage,
 "video"
 )
 
 let buffer = Buffer.from([])
 
 for await (const chunk of stream) {
-buffer = Buffer.concat([buffer, chunk])
+buffer =
+Buffer.concat([buffer, chunk])
 }
 
 await sock.sendMessage(from, {
 video: buffer,
-caption: "👀 View Once Video Recovered"
+caption:
+"👀 Recovered View Once Video"
 })
 
 }
 
 }
 
-
 // ======================
-// AI COMMAND
+// SPAM
 // ======================
 
-else if (text.startsWith(".ai ")) {
+else if (
+text.startsWith(`${PREFIX}spam `)
+) {
 
-const query = text.slice(4)
+if (!isOwner)
+return sock.sendMessage(from, {
+text: "Owner only."
+})
+
+const args =
+text.replace(`${PREFIX}spam `, "")
+.split("|")
+
+const amount = parseInt(args[0])
+const spamText = args[1]
+
+if (!amount || !spamText)
+return sock.sendMessage(from, {
+text:
+"Example:\n.spam 5|hello"
+})
+
+for (let i = 0; i < amount; i++) {
 
 await sock.sendMessage(from, {
-text: `AI Response 🤖\n\n${query}`
+text: spamText
+})
+
+await delay(500)
+
+}
+
+}
+
+// ======================
+// BROADCAST
+// ======================
+
+else if (
+text.startsWith(`${PREFIX}broadcast `)
+) {
+
+if (!isOwner)
+return sock.sendMessage(from, {
+text: "Owner only."
+})
+
+const bcText =
+text.replace(`${PREFIX}broadcast `, "")
+
+const chats =
+Object.keys(sock.chats)
+
+for (let id of chats) {
+
+await sock.sendMessage(id, {
+text:
+`📢 BROADCAST\n\n${bcText}`
 })
 
 }
 
+}
 
 // ======================
-// MENU
+// AUTOREPLY
 // ======================
 
-else if (text === ".menu") {
+else if (
+text === `${PREFIX}autoreply on`
+) {
+
+autoReply = true
 
 await sock.sendMessage(from, {
-text: `
-╔══════════════╗
-      HANSMD BOT
-╚══════════════╝
-
-👑 Owner : Mr Hans
-⚡ Prefix : .
-
-╭──〔 MAIN MENU 〕──╮
-┃ .menu
-┃ .ping
-┃ .alive
-┃ .owner
-┃ .runtime
-┃ .status
-┃ .cpu
-┃ .ram
-┃ .time
-┃ .date
-╰────────────────╯
-
-╭──〔 AUTO REPLY 〕──╮
-┃ hi
-┃ hello
-┃ goodnight
-╰──────────────────╯
-
-╭──〔 FUN MENU 〕──╮
-┃ .joke
-┃ .quote
-┃ .truth
-┃ .dare
-┃ .hack
-┃ .ship
-┃ .character
-╰────────────────╯
-
-╭──〔 EXTRA MENU 〕──╮
-┃ .vv
-┃ .ai hello
-╰──────────────────╯
-`
+text: "✅ AutoReply Enabled"
 })
+
+}
+
+else if (
+text === `${PREFIX}autoreply off`
+) {
+
+autoReply = false
+
+await sock.sendMessage(from, {
+text: "❌ AutoReply Disabled"
+})
+
+}
+
+// ======================
+// AUTO REPLIES
+// ======================
+
+else if (
+autoReply &&
+text.toLowerCase() === "hi"
+) {
+
+await sock.sendMessage(from, {
+text: "👋 Hello from HansMD"
+})
+
+}
+
+else if (
+autoReply &&
+text.toLowerCase() === "hello"
+) {
+
+await sock.sendMessage(from, {
+text: "😊 Hi there"
+})
+
+}
+
+// ======================
+// FUN
+// ======================
+
+else if (text === `${PREFIX}joke`) {
+
+await sock.sendMessage(from, {
+text:
+"😂 Why do Java developers wear glasses? Because they don't C#."
+})
+
+}
+
+else if (text === `${PREFIX}quote`) {
+
+await sock.sendMessage(from, {
+text:
+"💯 Discipline creates success."
+})
+
+}
+
+else if (text === `${PREFIX}truth`) {
+
+await sock.sendMessage(from, {
+text:
+"🤔 What is your darkest secret?"
+})
+
+}
+
+else if (text === `${PREFIX}dare`) {
+
+await sock.sendMessage(from, {
+text:
+"😈 Dance for 30 seconds."
+})
+
+}
+
+else if (text === `${PREFIX}ship`) {
+
+const percent =
+Math.floor(Math.random() * 100)
+
+await sock.sendMessage(from, {
+text:
+`❤️ Love Percentage: ${percent}%`
+})
+
+}
+
+else if (text === `${PREFIX}hack`) {
+
+await sock.sendMessage(from, {
+text:
+`💻 HACKING STARTED...
+
+█10%
+██20%
+███30%
+████40%
+█████50%
+██████60%
+███████70%
+████████80%
+█████████90%
+██████████100%
+
+ACCESS GRANTED ✅`
+})
+
+}
+
+// ======================
+// RESTART
+// ======================
+
+else if (text === `${PREFIX}restart`) {
+
+if (!isOwner)
+return sock.sendMessage(from, {
+text: "Owner only."
+})
+
+await sock.sendMessage(from, {
+text: "♻ Restarting..."
+})
+
+process.exit()
+
+}
+
+// ======================
+// SHUTDOWN
+// ======================
+
+else if (text === `${PREFIX}shutdown`) {
+
+if (!isOwner)
+return sock.sendMessage(from, {
+text: "Owner only."
+})
+
+await sock.sendMessage(from, {
+text: "🛑 Shutting down..."
+})
+
+process.exit(1)
 
 }
 
@@ -510,7 +962,7 @@ console.log(err)
 
 }
 
-})
+})s
 
 }
 
